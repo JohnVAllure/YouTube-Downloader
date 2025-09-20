@@ -16,6 +16,7 @@ public class AppSettings
     public string FfmpegPath { get; set; } = string.Empty;
     public bool AutoCheckAppUpdates { get; set; } = true;
     public string AppUpdateFeedUrl { get; set; } = string.Empty; // JSON feed with { version, downloadUrl }
+    public bool ConvertVideoToMp4 { get; set; } = false;
     public bool HasCompletedFirstRun { get; set; } = false;
 }
 
@@ -37,6 +38,8 @@ public static class SettingsManager
                 var obj = JsonSerializer.Deserialize<AppSettings>(json);
                 if (obj != null)
                 {
+                    if (string.IsNullOrWhiteSpace(obj.AppUpdateFeedUrl))
+                        obj.AppUpdateFeedUrl = "https://api.github.com/repos/JohnVAllure/YouTube-Downloader/releases/latest";
                     _cached = obj;
                     return _cached;
                 }
@@ -52,7 +55,9 @@ public static class SettingsManager
         {
             // Tools default to blank; user must download or browse
             YtDlpPath = string.Empty,
-            FfmpegPath = string.Empty
+            FfmpegPath = string.Empty,
+            AppUpdateFeedUrl = "https://api.github.com/repos/JohnVAllure/YouTube-Downloader/releases/latest",
+            ConvertVideoToMp4 = false
         };
         try
         {

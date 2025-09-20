@@ -1,12 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
 using System.Runtime.Versioning;
 using System.Text;
-using System.Threading.Tasks;
-using System.IO.Compression;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace YouTubeDownloader;
 
@@ -168,30 +169,17 @@ public static class ToolsManager
 
             ZipFile.ExtractToDirectory(zipPath, extractDir);
 
-            // Find ffmpeg.exe (and optionally ffprobe/ffplay)
-            string? ffmpegExe = null;
-            string? ffprobeExe = null;
-            string? ffplayExe = null;
-            foreach (var file in Directory.EnumerateFiles(extractDir, "*.exe", SearchOption.AllDirectories))
-            {
-                var name = Path.GetFileName(file).ToLowerInvariant();
-                if (name == "ffmpeg.exe") ffmpegExe = file;
-                else if (name == "ffprobe.exe") ffprobeExe = file;
-                else if (name == "ffplay.exe") ffplayExe = file;
-            }
-
+            var ffmpegExe = Directory.EnumerateFiles(extractDir, "ffmpeg.exe", SearchOption.AllDirectories).FirstOrDefault();
             if (ffmpegExe == null)
             {
                 AppLogger.LogError("Downloaded ffmpeg archive did not contain ffmpeg.exe.");
                 throw new Exception("ffmpeg.exe not found in archive.");
             }
 
-            // Copy into version dir
-            var destFfmpeg = Path.Combine(versionDir, "ffmpeg.exe");
-            File.Copy(ffmpegExe, destFfmpeg, overwrite: true);
-            if (ffprobeExe != null) File.Copy(ffprobeExe, Path.Combine(versionDir, "ffprobe.exe"), overwrite: true);
-            if (ffplayExe != null) File.Copy(ffplayExe, Path.Combine(versionDir, "ffplay.exe"), overwrite: true);
+            var binDir = Path.GetDirectoryName(ffmpegExe)!;
+            CopyDirectory(binDir, versionDir);
 
+            var destFfmpeg = Path.Combine(versionDir, "ffmpeg.exe");
             TryMakeExecutable(destFfmpeg);
             try { CleanupOldVersions(root, destFfmpeg); } catch { }
             return (true, destFfmpeg);
@@ -319,6 +307,21 @@ public static class ToolsManager
             File.SetAttributes(path, attr & ~FileAttributes.ReadOnly);
         }
         catch { }
+    }
+
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+        foreach (var file in Directory.EnumerateFiles(sourceDir))
+        {
+            var destFile = Path.Combine(destinationDir, Path.GetFileName(file));
+            File.Copy(file, destFile, overwrite: true);
+        }
+        foreach (var dir in Directory.EnumerateDirectories(sourceDir))
+        {
+            var destSub = Path.Combine(destinationDir, Path.GetFileName(dir));
+            CopyDirectory(dir, destSub);
+        }
     }
 
     private static void CleanupOldVersions(string toolRoot, string keepExePath)

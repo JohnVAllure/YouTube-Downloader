@@ -1,10 +1,12 @@
 ﻿using Dark.Net;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
@@ -227,6 +229,185 @@ namespace YouTubeDownloader
         }
 
         private static string FormatTime(TimeSpan value) => value.ToString(@"hh\:mm\:ss");
+
+        private static bool IsAgeRestrictionMessage(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            var lower = message.ToLowerInvariant();
+            return lower.Contains("age-restricted") ||
+                   lower.Contains("age restricted") ||
+                   lower.Contains("sign in to confirm your age") ||
+                   lower.Contains("verify your age") ||
+                   lower.Contains("adult content") ||
+                   lower.Contains("policy violation: age-restricted");
+        }
+
+        private static string? ExtractDownloadedFilePath(string? output, string targetFolder)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(output)) return null;
+                var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var raw in lines.Reverse())
+                {
+                    var line = raw.Trim();
+                    if (line.Length == 0) continue;
+
+                    const string mergeToken = "Merging formats into \"";
+                    if (line.Contains(mergeToken, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var start = line.IndexOf('"');
+                        var end = line.LastIndexOf('"');
+                        if (start >= 0 && end > start)
+                        {
+                            var path = line.Substring(start + 1, end - start - 1);
+                            return NormalizeDownloadedPath(path, targetFolder);
+                        }
+                    }
+
+                    const string destinationToken = "Destination:";
+                    if (line.StartsWith("[download]", StringComparison.OrdinalIgnoreCase) && line.Contains(destinationToken, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var idx = line.IndexOf(destinationToken, StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0)
+                        {
+                            var pathPart = line.Substring(idx + destinationToken.Length).Trim();
+                            pathPart = pathPart.Trim('"');
+                            return NormalizeDownloadedPath(pathPart, targetFolder);
+                        }
+                    }
+
+                    if (line.StartsWith("[Merger]", StringComparison.OrdinalIgnoreCase) && line.Contains("into \"", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var start = line.IndexOf('"');
+                        var end = line.LastIndexOf('"');
+                        if (start >= 0 && end > start)
+                        {
+                            var path = line.Substring(start + 1, end - start - 1);
+                            return NormalizeDownloadedPath(path, targetFolder);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError("Failed to parse download output for file path.", ex);
+            }
+
+            return GuessMostRecentDownloadedFile(targetFolder);
+        }
+
+        private static string? NormalizeDownloadedPath(string path, string targetFolder)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            var trimmed = path.Trim();
+            if (System.IO.Path.IsPathRooted(trimmed))
+            {
+                return trimmed;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetFolder)) return null;
+            try
+            {
+                return System.IO.Path.GetFullPath(System.IO.Path.Combine(targetFolder, trimmed));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? GuessMostRecentDownloadedFile(string targetFolder)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(targetFolder) || !Directory.Exists(targetFolder)) return null;
+                var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".m4a", ".mp3" };
+                var candidate = Directory.EnumerateFiles(targetFolder)
+                    .Where(f => extensions.Contains(System.IO.Path.GetExtension(f)))
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault();
+                return candidate;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string GetUniqueFilePathWithExtension(string sourcePath, string newExtension)
+        {
+            var directory = System.IO.Path.GetDirectoryName(sourcePath) ?? string.Empty;
+            var baseName = System.IO.Path.GetFileNameWithoutExtension(sourcePath);
+            var candidate = System.IO.Path.Combine(directory, baseName + newExtension);
+            int counter = 1;
+            while (File.Exists(candidate))
+            {
+                candidate = System.IO.Path.Combine(directory, $"{baseName} ({counter}){newExtension}");
+                counter++;
+            }
+            return candidate;
+        }
+
+        private static bool IsVideoDownload(string? downloadType)
+        {
+            if (string.IsNullOrWhiteSpace(downloadType)) return false;
+            return downloadType.Contains("Video", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<string?> ConvertVideoToMp4Async(DownloadItem item, string sourcePath, string ffmpegPath, CancellationToken token)
+        {
+            try
+            {
+                var destination = GetUniqueFilePathWithExtension(sourcePath, ".mp4");
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    item.Status = "Converting to MP4";
+                    item.ErrorMessage = string.Empty;
+                    item.RetryVisible = Visibility.Collapsed;
+                    item.ErrorVisible = Visibility.Collapsed;
+                    item.OpenVisible = Visibility.Collapsed;
+                });
+
+                var args = $"-y -i \"{sourcePath}\" -c:v libx264 -preset medium -crf 20 -c:a aac -movflags +faststart \"{destination}\"";
+                await RunProcessCaptureAsync(ffmpegPath, args, token);
+
+                try { File.Delete(sourcePath); } catch (Exception ex) { AppLogger.LogWarning($"Failed to delete source file '{sourcePath}' after MP4 conversion: {ex.Message}"); }
+                AppLogger.LogInfo($"Converted {sourcePath} to MP4 at {destination}.");
+                return destination;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (ProcessExecutionException ex)
+            {
+                AppLogger.LogProcessFailure($"MP4 conversion failed for {sourcePath}.", ex);
+                var summary = SummarizeProcessFailure(ex);
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    item.Status = "Failed (Conversion)";
+                    item.ErrorMessage = summary;
+                    item.RetryVisible = Visibility.Visible;
+                    item.ErrorVisible = Visibility.Visible;
+                    item.OpenVisible = File.Exists(sourcePath) ? Visibility.Visible : Visibility.Collapsed;
+                });
+                return null;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.LogError($"MP4 conversion failed for {sourcePath}.", ex);
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    item.Status = "Failed (Conversion)";
+                    item.ErrorMessage = ex.Message;
+                    item.RetryVisible = Visibility.Visible;
+                    item.ErrorVisible = Visibility.Visible;
+                    item.OpenVisible = File.Exists(sourcePath) ? Visibility.Visible : Visibility.Collapsed;
+                });
+                return null;
+            }
+        }
 
         private void AddLinkToQueue(string url)
         {
@@ -492,7 +673,7 @@ namespace YouTubeDownloader
             }
         }
 
-        const string SaveFilePath = "downloads.json";
+        private static readonly string SaveFilePath = System.IO.Path.Combine(AppPaths.AppDataDirectory, "downloads.json");
         private void SaveDownloadQueue()
         {
             if (!Dispatcher.CheckAccess())
@@ -519,6 +700,7 @@ namespace YouTubeDownloader
             try
             {
                 var json = JsonSerializer.Serialize(serializableList);
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SaveFilePath)!);
                 File.WriteAllText(SaveFilePath, json);
             }
             catch (Exception ex)
@@ -742,10 +924,25 @@ namespace YouTubeDownloader
             catch (ProcessExecutionException ex)
             {
                 AppLogger.LogProcessFailure($"Failed to resolve title for {item.Url}.", ex);
+                var summary = SummarizeProcessFailure(ex);
+                if (IsAgeRestrictionMessage(summary) || IsAgeRestrictionMessage(ex.StdError) || IsAgeRestrictionMessage(ex.StdOutput))
+                {
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        item.VideoTitle = "Video is age restricted. Cannot download.";
+                    });
+                }
             }
             catch (Exception ex)
             {
                 AppLogger.LogError($"Failed to resolve title for {item.Url}.", ex);
+                if (IsAgeRestrictionMessage(ex.Message))
+                {
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        item.VideoTitle = "Video is age restricted. Cannot download.";
+                    });
+                }
             }
         }
 
@@ -836,9 +1033,15 @@ namespace YouTubeDownloader
 
             Application.Current.Dispatcher.Invoke(() => item.Status = "Downloading");
             string output;
+            string? finalFilePath = null;
             try
             {
                 output = await RunProcessCaptureAsync(yt, args, token);
+                finalFilePath = ExtractDownloadedFilePath(output, targetFolder);
+                if (!string.IsNullOrWhiteSpace(finalFilePath))
+                {
+                    item.FilePath = finalFilePath;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -849,6 +1052,7 @@ namespace YouTubeDownloader
                     item.ErrorMessage = "Cancelled by user";
                     item.RetryVisible = Visibility.Visible;
                     item.ErrorVisible = Visibility.Visible;
+                    item.OpenVisible = Visibility.Collapsed;
                 });
                 TryCleanupPartialFiles(targetFolder);
                 return;
@@ -857,12 +1061,24 @@ namespace YouTubeDownloader
             {
                 AppLogger.LogProcessFailure($"Download failed for {item.Url} ({item.DownloadType}).", ex);
                 var summary = SummarizeProcessFailure(ex);
+                var ageRestricted = IsAgeRestrictionMessage(summary) || IsAgeRestrictionMessage(ex.StdError) || IsAgeRestrictionMessage(ex.StdOutput);
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    item.Status = "Failed";
-                    item.ErrorMessage = summary;
-                    item.RetryVisible = Visibility.Visible;
+                    if (ageRestricted)
+                    {
+                        const string ageMessage = "Video is age restricted. Cannot download.";
+                        item.Status = "Failed (Age Restricted)";
+                        item.ErrorMessage = ageMessage;
+                        item.VideoTitle = ageMessage;
+                    }
+                    else
+                    {
+                        item.Status = "Failed";
+                        item.ErrorMessage = summary;
+                    }
+                    item.RetryVisible = ageRestricted ? Visibility.Collapsed : Visibility.Visible;
                     item.ErrorVisible = Visibility.Visible;
+                    item.OpenVisible = Visibility.Collapsed;
                 });
                 TryCleanupPartialFiles(targetFolder);
                 return;
@@ -870,15 +1086,109 @@ namespace YouTubeDownloader
             catch (Exception ex)
             {
                 AppLogger.LogError($"Download failed for {item.Url} ({item.DownloadType}).", ex);
+                var message = ex.Message;
+                var ageRestricted = IsAgeRestrictionMessage(message);
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    item.Status = "Failed";
-                    item.ErrorMessage = ex.Message;
-                    item.RetryVisible = Visibility.Visible;
+                    if (ageRestricted)
+                    {
+                        const string ageMessage = "Video is age restricted. Cannot download.";
+                        item.Status = "Failed (Age Restricted)";
+                        item.ErrorMessage = ageMessage;
+                        item.VideoTitle = ageMessage;
+                    }
+                    else
+                    {
+                        item.Status = "Failed";
+                        item.ErrorMessage = message;
+                    }
+                    item.RetryVisible = ageRestricted ? Visibility.Collapsed : Visibility.Visible;
                     item.ErrorVisible = Visibility.Visible;
+                    item.OpenVisible = Visibility.Collapsed;
                 });
                 TryCleanupPartialFiles(targetFolder);
                 return;
+            }
+
+            if (string.IsNullOrWhiteSpace(finalFilePath))
+            {
+                if (!string.IsNullOrWhiteSpace(item.FilePath))
+                {
+                    finalFilePath = item.FilePath;
+                }
+                else
+                {
+                    finalFilePath = GuessMostRecentDownloadedFile(targetFolder);
+                    if (!string.IsNullOrWhiteSpace(finalFilePath))
+                        item.FilePath = finalFilePath;
+                }
+            }
+
+            if (settings.ConvertVideoToMp4 && IsVideoDownload(item.DownloadType))
+            {
+                if (string.IsNullOrWhiteSpace(settings.FfmpegPath) || !File.Exists(settings.FfmpegPath))
+                {
+                    AppLogger.LogError("Cannot convert to MP4 because ffmpeg path is not configured.");
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        item.Status = "Failed (Conversion)";
+                        item.ErrorMessage = "Cannot convert to MP4: ffmpeg path is not configured.";
+                        item.RetryVisible = Visibility.Visible;
+                        item.ErrorVisible = Visibility.Visible;
+                        item.OpenVisible = !string.IsNullOrWhiteSpace(item.FilePath) && File.Exists(item.FilePath) ? Visibility.Visible : Visibility.Collapsed;
+                    });
+                    SaveDownloadQueue();
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(finalFilePath) || !File.Exists(finalFilePath))
+                {
+                    AppLogger.LogError("Cannot convert to MP4 because the downloaded file could not be located.");
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        item.Status = "Failed (Conversion)";
+                        item.ErrorMessage = "Cannot convert to MP4: downloaded file not found.";
+                        item.RetryVisible = Visibility.Visible;
+                        item.ErrorVisible = Visibility.Visible;
+                        item.OpenVisible = Visibility.Collapsed;
+                    });
+                    SaveDownloadQueue();
+                    return;
+                }
+
+                string? mp4Path;
+                try
+                {
+                    mp4Path = await ConvertVideoToMp4Async(item, finalFilePath, settings.FfmpegPath!, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    AppLogger.LogInfo($"Download cancelled for {item.Url} ({item.DownloadType}).");
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        item.Status = "Failed";
+                        item.ErrorMessage = "Cancelled by user";
+                        item.RetryVisible = Visibility.Visible;
+                        item.ErrorVisible = Visibility.Visible;
+                        item.OpenVisible = !string.IsNullOrWhiteSpace(item.FilePath) && File.Exists(item.FilePath) ? Visibility.Visible : Visibility.Collapsed;
+                    });
+                    TryCleanupPartialFiles(targetFolder);
+                    return;
+                }
+
+                if (mp4Path == null)
+                {
+                    SaveDownloadQueue();
+                    return;
+                }
+
+                finalFilePath = mp4Path;
+                item.FilePath = mp4Path;
+            }
+
+            if (!string.IsNullOrWhiteSpace(finalFilePath))
+            {
+                item.FilePath = finalFilePath;
             }
 
             Application.Current.Dispatcher.Invoke(() =>
@@ -1019,14 +1329,18 @@ namespace YouTubeDownloader
                 var latest = await AppUpdateManager.GetLatestAsync(s.AppUpdateFeedUrl);
                 if (latest != null && AppUpdateManager.IsNewer(current, latest.Version))
                 {
-                    var msg = $"A new version {latest.Version} is available.\nCurrent version: {current}.";
+                    var displayVersion = string.IsNullOrWhiteSpace(latest.DisplayVersion) ? latest.Version : latest.DisplayVersion;
+                    var currentDisplay = AppUpdateManager.FormatVersion(current);
+                    var msg = $"A new version {displayVersion} is available.\nCurrent version: {currentDisplay}.";
                     if (!string.IsNullOrWhiteSpace(latest.Notes)) msg += "\n\n" + latest.Notes;
-                    if (!string.IsNullOrWhiteSpace(latest.DownloadUrl))
+
+                    var launchUrl = !string.IsNullOrWhiteSpace(latest.DownloadUrl) ? latest.DownloadUrl : latest.ReleasePageUrl;
+                    if (!string.IsNullOrWhiteSpace(launchUrl))
                     {
-                        msg += "\n\nOpen the download page now?";
+                        msg += "\n\nDownload the new version now?";
                         if (MessageBox.Show(msg, "Update Available", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
                         {
-                            try { Process.Start(new ProcessStartInfo(latest.DownloadUrl) { UseShellExecute = true }); } catch { }
+                            try { Process.Start(new ProcessStartInfo(launchUrl) { UseShellExecute = true }); } catch { }
                         }
                     }
                     else

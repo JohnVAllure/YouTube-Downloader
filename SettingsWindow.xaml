@@ -32,7 +32,8 @@
         <StackPanel Grid.Row="1" Margin="0,8,0,8">
             <TextBlock Text="Behavior" FontWeight="Bold" Foreground="#FFB86C"/>
             <CheckBox x:Name="AutoOpenCheck" Content="Automatically open folder and highlight file upon completion" Checked="AutoOpenCheck_Checked" Foreground="White"/>
-            <CheckBox x:Name="AutoUpdateToolsCheck" Content="Automatically check/update yt-dlp &amp; ffmpeg" Foreground="White"/>
+            <CheckBox x:Name="AutoUpdateToolsCheck" Content="Automatically check/update yt-dlp &amp; ffmpeg" Foreground="White"/>
+            <CheckBox x:Name="ConvertToMp4Check" Content="Convert all video downloads to .mp4" Foreground="White"/>
         </StackPanel>
 
         <!-- Simultaneous Downloads -->

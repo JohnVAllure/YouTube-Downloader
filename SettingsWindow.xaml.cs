@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
         DownloadDirectoryText.Text = settings.DownloadDirectory;
         AutoOpenCheck.IsChecked = settings.AutoOpenOnComplete;
         AutoUpdateToolsCheck.IsChecked = settings.AutoUpdateTools;
+        ConvertToMp4Check.IsChecked = settings.ConvertVideoToMp4;
         SingleFolderRadio.IsChecked = !settings.OrganizeByType;
         SubfoldersRadio.IsChecked = settings.OrganizeByType;
 
@@ -63,6 +64,7 @@ public partial class SettingsWindow : Window
         settings.DownloadDirectory = DownloadDirectoryText.Text ?? string.Empty;
         settings.AutoOpenOnComplete = AutoOpenCheck.IsChecked == true;
         settings.AutoUpdateTools = AutoUpdateToolsCheck.IsChecked == true;
+        settings.ConvertVideoToMp4 = ConvertToMp4Check.IsChecked == true;
         settings.OrganizeByType = SubfoldersRadio.IsChecked == true;
         settings.ConcurrentDownloads = (ConcurrentDownloadsCombo.SelectedIndex >= 0 ? ConcurrentDownloadsCombo.SelectedIndex + 1 : 2);
         settings.YtDlpPath = YtDlpPathText.Text?.Trim() ?? string.Empty;
