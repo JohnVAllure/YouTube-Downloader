@@ -1,0 +1,64 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<ApplicationIcon>Assets/app.ico</ApplicationIcon>
+		<Version>0.1.3</Version>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Remove="Assets\add.png" />
+	  <None Remove="Assets\cancel.png" />
+	  <None Remove="Assets\download.png" />
+	  <None Remove="Assets\app.ico" />
+	  <None Remove="Assets\paste.png" />
+	  <None Remove="Assets\reply.png" />
+	  <None Remove="Assets\settings.png" />
+	  <None Remove="Assets\success.png" />
+	  <None Remove="Assets\updates.png" />
+	  <None Remove="Assets\warn.png" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Resource Include="Assets\add.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\cancel.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\download.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\app.ico">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\paste.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\reply.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\settings.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\success.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\updates.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	  <Resource Include="Assets\warn.png">
+	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+	  </Resource>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="DarkNet" Version="2.3.0" />
+	</ItemGroup>
+
+</Project>

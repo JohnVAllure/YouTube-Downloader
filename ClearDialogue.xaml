@@ -1,0 +1,20 @@
+﻿<Window x:Class="YouTubeDownloader.ClearDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Clear Downloads List" Height="220" Width="400"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#282A36" Foreground="White" FontFamily="Segoe UI Variable">
+    
+    <StackPanel Margin="20">
+        <TextBlock Text="What would you like to clear?" Margin="0,0,0,15" TextAlignment="Center" FontSize="16"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="5,5,5,15">
+            <Button Content="Clear Completed" ToolTip="Removes only the completed links from the list." Width="120" Margin="5,5,20,5" Click="ClearCompleted_Click"/>
+            <Button Content="Clear All" Width="120" ToolTip="Removes EVERYTHING from the list." Margin="20,5,5,5" Click="ClearAll_Click"/>
+        </StackPanel>
+        <TextBlock TextWrapping="Wrap" TextAlignment="Center" Foreground="#FFB86C" FontSize="12">
+        <Run Text="⚠️ Warning: "/>
+        <Run Text="Clear All" FontWeight="Bold"/>
+        <Run Text=" will delete all links in the list, including links that have not been downloaded yet."/>
+        </TextBlock>
+    </StackPanel>
+</Window>

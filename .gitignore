@@ -1,0 +1,21 @@
+# Visual Studio / .NET build artifacts
+bin/
+obj/
+dist/
+
+# VS config/cache
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Publish output, installer artifacts
+publish/
+*.pdb
+*.exe
+*.msi
+*.zip
+
+# Logs & temp
+*.log

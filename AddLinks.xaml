@@ -1,0 +1,29 @@
+﻿<Window x:Class="YouTubeDownloader.AddLinksWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Add Multiple Links" Height="640" Width="640"
+        Background="#282A36" Foreground="White"
+        FontFamily="Segoe UI" FontSize="14">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Bulk Input Box -->
+        <TextBox x:Name="BulkLinksBox" Grid.Row="0"
+                 AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
+                 Background="#44475A" Foreground="White"
+                 BorderBrush="#1E1F29" BorderThickness="1"
+                 FontSize="14" Padding="10"
+                 TextChanged="BulkLinksBox_TextChanged"/>
+
+        <!-- Add Button -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="AddLinksButton" Content="Add Links" Width="100" Height="30" Margin="5"
+                    Click="AddLinksButton_Click" Background="#50FA7B" Foreground="#282A36" BorderBrush="Transparent"/>
+            <Button Content="Cancel" Width="80" Height="30" Margin="5"
+                    Click="Cancel_Click" Background="#FF5555" Foreground="#282A36" BorderBrush="Transparent"/>
+        </StackPanel>
+    </Grid>
+</Window>
