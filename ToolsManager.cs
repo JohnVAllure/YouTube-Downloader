@@ -48,8 +48,7 @@ public static class ToolsManager
         var tmp = Path.Combine(Path.GetTempPath(), "YouTubeDownloader", "yt-dlp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
         var tmpExe = Path.Combine(tmp, "yt-dlp.exe");
-        using (var client = new HttpClient())
-        using (var resp = await client.GetAsync(YtDlpUrl, HttpCompletionOption.ResponseHeadersRead))
+        using (var resp = await SharedClient.GetAsync(YtDlpUrl, HttpCompletionOption.ResponseHeadersRead))
         {
             resp.EnsureSuccessStatusCode();
             await using var fs = File.Create(tmpExe);
@@ -92,8 +91,7 @@ public static class ToolsManager
     {
         try
         {
-            using var client = MakeHttpClient();
-            var json = await client.GetStringAsync(YtDlpLatestApi);
+            var json = await SharedClient.GetStringAsync(YtDlpLatestApi);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("tag_name", out var tag))
                 return tag.GetString() ?? string.Empty;
@@ -108,8 +106,7 @@ public static class ToolsManager
     {
         try
         {
-            using var client = MakeHttpClient();
-            var json = await client.GetStringAsync(FfmpegBuildsLatestApi);
+            var json = await SharedClient.GetStringAsync(FfmpegBuildsLatestApi);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             {
@@ -159,8 +156,7 @@ public static class ToolsManager
 
         try
         {
-            using (var client = MakeHttpClient())
-            using (var resp = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+            using (var resp = await SharedClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
             {
                 resp.EnsureSuccessStatusCode();
                 await using var fs = File.Create(zipPath);
@@ -174,6 +170,18 @@ public static class ToolsManager
             {
                 AppLogger.LogError("Downloaded ffmpeg archive did not contain ffmpeg.exe.");
                 throw new Exception("ffmpeg.exe not found in archive.");
+            }
+
+            // If the current ffmpeg is identical to what we just downloaded, skip the install
+            if (!string.IsNullOrWhiteSpace(desiredPath) && File.Exists(desiredPath))
+            {
+                var newHash = await GetHashAsync(ffmpegExe);
+                var curHash = await GetHashAsync(desiredPath);
+                if (newHash.Equals(curHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    AppLogger.LogInfo("ffmpeg is already up to date.");
+                    return (false, desiredPath);
+                }
             }
 
             var binDir = Path.GetDirectoryName(ffmpegExe)!;
@@ -219,8 +227,7 @@ public static class ToolsManager
                 return false;
             }
 
-            using var client = MakeHttpClient();
-            var json = await client.GetStringAsync(FfmpegBuildsLatestApi);
+            var json = await SharedClient.GetStringAsync(FfmpegBuildsLatestApi);
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("published_at", out var published))
             {
@@ -234,12 +241,14 @@ public static class ToolsManager
         return false;
     }
 
-    private static HttpClient MakeHttpClient()
+    private static readonly HttpClient SharedClient = CreateSharedClient();
+    private static HttpClient CreateSharedClient()
     {
         var client = new HttpClient();
         client.DefaultRequestHeaders.UserAgent.ParseAdd("YouTubeDownloader/1.0");
         return client;
     }
+    private static HttpClient MakeHttpClient() => SharedClient;
 
     private static string NormalizeTargetPath(string desiredPath, string defaultFileName)
     {
@@ -393,9 +402,13 @@ public static class ToolsManager
         };
         using var proc = new Process { StartInfo = psi };
         proc.Start();
-        string output = await proc.StandardOutput.ReadToEndAsync();
-        string error = await proc.StandardError.ReadToEndAsync();
+        // Read both streams concurrently to avoid deadlock when one buffer fills
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        var stderrTask = proc.StandardError.ReadToEndAsync();
+        await Task.WhenAll(stdoutTask, stderrTask);
         await Task.Run(() => proc.WaitForExit());
+        string output = await stdoutTask;
+        string error = await stderrTask;
         return string.IsNullOrWhiteSpace(output) ? error : output;
     }
 }

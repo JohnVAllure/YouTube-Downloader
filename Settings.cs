@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -18,17 +17,25 @@ public class AppSettings
     public string AppUpdateFeedUrl { get; set; } = string.Empty; // JSON feed with { version, downloadUrl }
     public bool ConvertVideoToMp4 { get; set; } = false;
     public bool HasCompletedFirstRun { get; set; } = false;
+
+    public AppSettings Clone() => (AppSettings)MemberwiseClone();
 }
 
 public static class SettingsManager
 {
     private static string SettingsFilePath => Path.Combine(AppPaths.AppDataDirectory, "settings.json");
 
+    private static readonly JsonSerializerOptions SaveOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     private static AppSettings? _cached;
 
     public static AppSettings Load()
     {
-        if (_cached != null) return _cached;
+        if (_cached != null) return _cached.Clone();
 
         try
         {
@@ -41,7 +48,7 @@ public static class SettingsManager
                     if (string.IsNullOrWhiteSpace(obj.AppUpdateFeedUrl))
                         obj.AppUpdateFeedUrl = "https://api.github.com/repos/JohnVAllure/YouTube-Downloader/releases/latest";
                     _cached = obj;
-                    return _cached;
+                    return _cached.Clone();
                 }
             }
         }
@@ -70,17 +77,13 @@ public static class SettingsManager
         catch { }
 
         _cached = def;
-        return _cached;
+        return _cached.Clone();
     }
 
     public static void Save(AppSettings settings)
     {
-        _cached = settings;
-        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-        });
+        _cached = settings.Clone();
+        var json = JsonSerializer.Serialize(settings, SaveOptions);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsFilePath)!);

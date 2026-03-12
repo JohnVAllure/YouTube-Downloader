@@ -1,13 +1,13 @@
 [Setup]
 AppId={{6933949E-2F58-4D08-B5D4-F705B3CE55A9}
 AppName=YouTubeDownloader
-AppVersion=1.1.4
-AppVerName=YouTubeDownloader 1.1.4
+AppVersion=1.1.6
+AppVerName=YouTubeDownloader 1.1.6
 DefaultDirName={autopf}\YouTubeDownloader
 DefaultGroupName=YouTubeDownloader
 UninstallDisplayIcon={app}\YouTubeDownloader.exe
 OutputDir=dist
-OutputBaseFilename=YouTubeDownloader-Setup-1.1.4
+OutputBaseFilename=YouTubeDownloader-Setup-1.1.6
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible

@@ -112,8 +112,8 @@ public static class AppUpdateManager
     public static string FormatVersion(Version version)
     {
         if (version == null) return string.Empty;
-        var parts = new List<int> { version.Major };
-        if (version.Minor >= 0) parts.Add(version.Minor);
+        // Minor is always non-negative; Build/Revision are -1 when unspecified
+        var parts = new List<int> { version.Major, version.Minor };
         if (version.Build >= 0) parts.Add(version.Build);
         if (version.Revision >= 0) parts.Add(version.Revision);
 

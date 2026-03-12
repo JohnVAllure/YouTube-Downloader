@@ -82,7 +82,11 @@ namespace YouTubeDownloader
         }
         private void OpenItemSettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            // TODO: Start downloading queued links
+            if (sender is Button btn && btn.DataContext is DownloadItem di)
+            {
+                var dlg = new ItemSettingsWindow(di) { Owner = this };
+                dlg.ShowDialog();
+            }
         }
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
@@ -100,6 +104,9 @@ namespace YouTubeDownloader
             }
         }
 
+        private static readonly HashSet<string> ActiveStatuses = new(StringComparer.OrdinalIgnoreCase)
+            { "Preparing", "Downloading", "Converting to MP4" };
+
         private void ClearButton_Click(object sender, RoutedEventArgs e)
         {
             var dialog = new ClearDialog { Owner = this };
@@ -107,37 +114,43 @@ namespace YouTubeDownloader
             {
                 if (dialog.SelectedOption == ClearDialog.ClearOption.Completed)
                 {
-                    // Filter and reset
                     var filtered = downloadQueue.Where(d => d.Status != "Completed").ToList();
                     downloadQueue.Clear();
                     foreach (var item in filtered)
-                    {
                         downloadQueue.Add(item);
-                    }
                 }
                 else if (dialog.SelectedOption == ClearDialog.ClearOption.All)
                 {
-                    downloadQueue.Clear();
+                    // Leave any actively downloading items in the queue so their tasks can finish cleanly
+                    var toRemove = downloadQueue.Where(d => !ActiveStatuses.Contains(d.Status)).ToList();
+                    foreach (var item in toRemove)
+                        downloadQueue.Remove(item);
                 }
 
-                // ✅ Re-index row numbers after changes
                 for (int i = 0; i < downloadQueue.Count; i++)
-                {
                     downloadQueue[i].RowNumber = i + 1;
-                }
 
                 UpdateEmptyHintVisibility();
             }
         }
 
-        private void Retry_Click(object sender, RoutedEventArgs e)
+        private async void Retry_Click(object sender, RoutedEventArgs e)
         {
-            // TODO: Retry failed download
+            if ((sender as Button)?.DataContext is not DownloadItem item) return;
+            item.Status = "Queued";
+            item.Progress = 0;
+            item.ErrorMessage = string.Empty;
+            item.RetryVisible = Visibility.Collapsed;
+            item.ErrorVisible = Visibility.Collapsed;
+            item.OpenVisible = Visibility.Collapsed;
+            if (!_isDownloading)
+                await StartDownloadsAsync();
         }
 
         private void ShowError_Click(object sender, RoutedEventArgs e)
         {
-            // TODO: Show error message in a popup
+            if ((sender as Button)?.DataContext is DownloadItem item && !string.IsNullOrWhiteSpace(item.ErrorMessage))
+                MessageBox.Show(item.ErrorMessage, "Download Error", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         private void OpenFolder_Click(object sender, RoutedEventArgs e)
@@ -419,6 +432,17 @@ namespace YouTubeDownloader
 
             var selection = GetCurrentDownloadSelection();
 
+            if (selection.downloadType.Contains("Segment", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TimeSpan.TryParse(selection.startTime, out var start) &&
+                    TimeSpan.TryParse(selection.endTime, out var end) &&
+                    end <= start)
+                {
+                    ShowStatusMessage("End time must be after start time for segment downloads.");
+                    return;
+                }
+            }
+
             var item = new DownloadItem
             {
                 RowNumber = downloadQueue.Count + 1,
@@ -447,30 +471,31 @@ namespace YouTubeDownloader
             EmptyHintText.Visibility = downloadQueue.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private string? ExtractYouTubeUrl(string text)
+        [GeneratedRegex(
+            @"(https?://)?(www\.)?(youtube\.com/(watch|shorts|playlist|embed)[^\s""'<>]*|youtu\.be/[^\s""'<>]*)",
+            RegexOptions.IgnoreCase)]
+        private static partial Regex YoutubeUrlRegex();
+
+        private static string? ExtractYouTubeUrl(string text)
         {
-            // Matches typical YouTube URLs
-            var regex = new Regex(@"(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w\-]{11}", RegexOptions.IgnoreCase);
-            var match = regex.Match(text);
-            if (match.Success)
+            var match = YoutubeUrlRegex().Match(text);
+            if (!match.Success) return null;
+
+            string url = match.Value;
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                url = "https://" + url;
+
+            // Normalize youtu.be short links to full watch URLs
+            if (url.Contains("youtu.be/", StringComparison.OrdinalIgnoreCase))
             {
-                string url = match.Value;
-
-                // Normalize to full canonical URL form
-                if (url.Contains("youtu.be/", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Convert short form to full watch URL
-                    var id = url.Substring(url.LastIndexOf('/') + 1);
-                    return $"https://www.youtube.com/watch?v={id}";
-                }
-
-                if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                    url = "https://" + url;
-
-                return url;
+                var prefix = "youtu.be/";
+                var idx = url.IndexOf(prefix, StringComparison.OrdinalIgnoreCase) + prefix.Length;
+                var videoId = url[idx..].Split('?', '&')[0].TrimEnd('/');
+                if (!string.IsNullOrWhiteSpace(videoId))
+                    return $"https://www.youtube.com/watch?v={videoId}";
             }
 
-            return null;
+            return url;
         }
 
         private void PasteLinkFromClipboard()
@@ -549,31 +574,40 @@ namespace YouTubeDownloader
 
         private void TimeBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            var box = sender as TextBox;
-            if (box == null) return;
+            if (sender is not TextBox box) return;
 
             string digits = new string(box.Text.Where(char.IsDigit).ToArray());
 
-            if (digits.Length > 6)
-                digits = digits.Substring(0, 6);
+            if (digits.Length > 6) digits = digits[..6];
+            while (digits.Length < 6) digits = "0" + digits;
 
-            while (digits.Length < 6)
-                digits = "0" + digits;
+            var formatted = $"{digits[..2]}:{digits[2..4]}:{digits[4..6]}";
+            if (box.Text == formatted) return; // already correct, avoid re-triggering
 
-            box.Text = $"{digits.Substring(0, 2)}:{digits.Substring(2, 2)}:{digits.Substring(4, 2)}";
+            box.Text = formatted;
             box.CaretIndex = box.Text.Length;
         }
 
+        private CancellationTokenSource? _statusCts;
         private async void ShowStatusMessage(string message, int durationSeconds = 4)
         {
+            // Cancel any previous pending fade-out so messages don't overlap
+            _statusCts?.Cancel();
+            _statusCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _statusCts = cts;
+
             StatusMessageTextBlock.Text = message;
             StatusMessageTextBlock.Opacity = 1;
+            StatusMessageTextBlock.BeginAnimation(OpacityProperty, null); // stop any running animation
 
-            // Wait the intended number of seconds before fading out
-            await Task.Delay(TimeSpan.FromSeconds(durationSeconds));
-
-            var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromSeconds(1));
-            StatusMessageTextBlock.BeginAnimation(OpacityProperty, fadeOut);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(durationSeconds), cts.Token);
+                var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromSeconds(1));
+                StatusMessageTextBlock.BeginAnimation(OpacityProperty, fadeOut);
+            }
+            catch (OperationCanceledException) { }
         }
         private ScrollViewer? _downloadsScrollViewer;
 
@@ -798,7 +832,7 @@ namespace YouTubeDownloader
             // Proactively kill any child processes we spawned (yt-dlp) if still running
             try
             {
-                foreach (var p in _childProcesses)
+                foreach (var p in _childProcesses.Values)
                 {
                     try { if (p != null && !p.HasExited) p.Kill(true); } catch { }
                 }
@@ -906,7 +940,7 @@ namespace YouTubeDownloader
                 return;
             try
             {
-                string title = await RunProcessCaptureAsync(yt, $"-e \"{item.Url}\"", CancellationToken.None);
+                string title = await RunProcessCaptureAsync(yt, $"-e \"{EscapeArg(item.Url)}\"", CancellationToken.None);
                 if (!string.IsNullOrWhiteSpace(title))
                 {
                     // Use first non-empty line as title
@@ -1203,36 +1237,39 @@ namespace YouTubeDownloader
             SaveDownloadQueue();
         }
 
+        private static string EscapeArg(string value) => value.Replace("\"", "\\\"");
+
         private string BuildYtDlpArgs(DownloadItem item, string targetFolder, AppSettings settings)
         {
             // Common flags: set output template
             var outTemplatePath = System.IO.Path.Combine(targetFolder, "%(title)s.%(ext)s");
-            var output = $"-o \"{outTemplatePath.Replace("\\", "/").Replace("\"", "\\\"")}\""; // yt-dlp accepts forward slashes on Windows
+            var output = $"-o \"{EscapeArg(outTemplatePath.Replace("\\", "/"))}\""; // yt-dlp accepts forward slashes on Windows
             var ffmpeg = settings.FfmpegPath;
-            var ffArg = string.IsNullOrWhiteSpace(ffmpeg) ? string.Empty : $" --ffmpeg-location \"{ffmpeg.Replace("\"", "\\\"")}\"";
+            var ffArg = string.IsNullOrWhiteSpace(ffmpeg) ? string.Empty : $" --ffmpeg-location \"{EscapeArg(ffmpeg)}\"";
+            var url = $"\"{EscapeArg(item.Url)}\"";
 
             bool isSeg = item.DownloadType?.Contains("Segment", StringComparison.OrdinalIgnoreCase) == true;
             string segArg = string.Empty;
             if (isSeg && TimeSpan.TryParse(item.StartTime, out var start) && TimeSpan.TryParse(item.EndTime, out var end) && end > start)
             {
-                segArg = $" --download-sections \"*{item.StartTime}-{item.EndTime}\" --force-keyframes-at-cuts";
+                segArg = $" --download-sections \"*{item.StartTime}-{item.EndTime}\"";
             }
 
             switch (item.DownloadType)
             {
                 case "Full Audio":
-                    return $"{output}{ffArg} -x --audio-format mp3 \"{item.Url}\"";
+                    return $"{output}{ffArg} -x --audio-format mp3 {url}";
                 case "Audio Segment":
-                    return $"{output}{ffArg}{segArg} -x --audio-format mp3 \"{item.Url}\"";
+                    return $"{output}{ffArg}{segArg} -x --audio-format mp3 {url}";
                 case "Video Segment":
-                    return $"{output}{ffArg}{segArg} \"{item.Url}\"";
+                    return $"{output}{ffArg}{segArg} {url}";
                 case "Full Video":
                 default:
-                    return $"{output}{ffArg} \"{item.Url}\"";
+                    return $"{output}{ffArg} {url}";
             }
         }
 
-        private static readonly ConcurrentBag<Process> _childProcesses = new();
+        private static readonly ConcurrentDictionary<int, Process> _childProcesses = new();
         private static async Task<string> RunProcessCaptureAsync(string exe, string args, CancellationToken token)
         {
             var tcs = new TaskCompletionSource<string>();
@@ -1249,11 +1286,11 @@ namespace YouTubeDownloader
             var output = new StringBuilder();
             var error = new StringBuilder();
             using var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            _childProcesses.Add(proc);
             proc.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
             proc.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
             proc.Exited += (_, __) =>
             {
+                _childProcesses.TryRemove(proc.Id, out Process? _);
                 var stdOut = output.ToString();
                 var stdErr = error.ToString();
 
@@ -1285,6 +1322,7 @@ namespace YouTubeDownloader
                 throw new ProcessExecutionException($"Failed to start process '{exe}'. {ex.Message}", exe, args, -1, string.Empty, string.Empty);
             }
 
+            _childProcesses.TryAdd(proc.Id, proc);
             proc.BeginOutputReadLine();
             proc.BeginErrorReadLine();
             using (token.Register(() => { try { if (!proc.HasExited) proc.Kill(true); } catch { } }))
